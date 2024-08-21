@@ -48,8 +48,6 @@ var rootCmd = &cobra.Command{
 			inputReader = file
 		}
 
-		charset, err := cmd.Flags().GetString("charset")
-		handleError(err)
 		removeAttributes, err := cmd.Flags().GetBool("remove-attributes")
 		handleError(err)
 
@@ -61,12 +59,53 @@ var rootCmd = &cobra.Command{
 			inputReader = p.SanitizeReader(inputReader)
 		}
 
-		document, err := ParseHTML(inputReader, charset)
+		charset, err := cmd.Flags().GetString("charset")
 		handleError(err)
 
-		nodes := []*html.Node{document}
+		root, err := ParseHTML(inputReader, charset)
+		handleError(err)
 
-		Display(nodes)
+		selectors, err := cmd.Flags().GetStringSlice("selector")
+		handleError(err)
+
+		// Parse the selectors
+		selectorFuncs := []SelectorFunc{}
+		funcGenerator := Select
+		var selector string
+		for len(selectors) > 0 {
+			selector, selectors = selectors[0], selectors[1:]
+			switch selector {
+			case "*": // select all
+				continue
+			case ">":
+				funcGenerator = SelectFromChildren
+			case "+":
+				funcGenerator = SelectNextSibling
+			case ",": // nil will signify a comma
+				selectorFuncs = append(selectorFuncs, nil)
+			default:
+				selector, err := ParseSelector(selector)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Selector parsing error: %s\n", err.Error())
+					os.Exit(2)
+				}
+				selectorFuncs = append(selectorFuncs, funcGenerator(selector))
+				funcGenerator = Select
+			}
+		}
+
+		selectedNodes := []*html.Node{}
+		currNodes := []*html.Node{root}
+		for _, selectorFunc := range selectorFuncs {
+			if selectorFunc == nil { // hit a comma
+				selectedNodes = append(selectedNodes, currNodes...)
+				currNodes = []*html.Node{root}
+			} else {
+				currNodes = selectorFunc(currNodes)
+			}
+		}
+		selectedNodes = append(selectedNodes, currNodes...)
+		Display(selectedNodes)
 	},
 }
 
@@ -91,6 +130,7 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.Flags().StringP("charset", "c", "", "Charset")
+	rootCmd.Flags().StringSliceP("selector", "s", []string{"*"}, "CSS Selector")
 	rootCmd.Flags().Bool("remove-attributes", false, "Remove attributes")
 }
 
