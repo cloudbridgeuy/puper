@@ -26,7 +26,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/microcosm-cc/bluemonday"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/net/html"
@@ -46,17 +45,6 @@ var rootCmd = &cobra.Command{
 			file, err := os.Open(args[0])
 			handleError(err)
 			inputReader = file
-		}
-
-		removeAttributes, err := cmd.Flags().GetBool("remove-attributes")
-		handleError(err)
-
-		if removeAttributes {
-			p := bluemonday.UGCPolicy()
-			p.AllowStandardURLs()
-			p.AllowAttrs("href").OnElements("a")
-
-			inputReader = p.SanitizeReader(inputReader)
 		}
 
 		charset, err := cmd.Flags().GetString("charset")
@@ -105,7 +93,16 @@ var rootCmd = &cobra.Command{
 			}
 		}
 		selectedNodes = append(selectedNodes, currNodes...)
-		Display(selectedNodes)
+
+		removeAttributes, err := cmd.Flags().GetBool("remove-attributes")
+		handleError(err)
+		removeSpan, err := cmd.Flags().GetBool("remove-span")
+		handleError(err)
+
+		Display{
+			attributes: !removeAttributes,
+			span:       !removeSpan,
+		}.Print(selectedNodes)
 	},
 }
 
@@ -132,6 +129,7 @@ func init() {
 	rootCmd.Flags().StringP("charset", "c", "", "Charset")
 	rootCmd.Flags().StringSliceP("selector", "s", []string{"*"}, "CSS Selector")
 	rootCmd.Flags().Bool("remove-attributes", false, "Remove attributes")
+	rootCmd.Flags().Bool("remove-span", false, "Remove span")
 }
 
 // initConfig reads in config file and ENV variables if set.
