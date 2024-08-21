@@ -22,12 +22,21 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"github.com/charmbracelet/log"
 	"io"
+	"net"
 	"os"
+	"os/exec"
+	"strings"
+	"syscall"
+	"time"
 
+	"github.com/shirou/gopsutil/process"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/tebeka/selenium"
 	"golang.org/x/net/html"
 )
 
@@ -35,13 +44,118 @@ var cfgFile string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "puper [HTML]",
+	Use:   "puper [STDIN/FILE/URL]",
 	Short: "Clean up HTML code",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		verbose, err := cmd.Flags().GetBool("verbose")
+		handleError(err)
+
+		if verbose {
+			log.SetLevel(log.DebugLevel)
+		}
+
 		var inputReader io.Reader = cmd.InOrStdin()
 
-		if len(args) > 0 && args[0] != "-" {
+		if len(args) == 0 {
+			args = []string{"-"}
+		}
+
+		selectors, err := cmd.Flags().GetStringSlice("selector")
+		handleError(err)
+
+		wait, err := cmd.Flags().GetInt("wait")
+		handleError(err)
+
+		// Check if the entrypoint is a URL
+		if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
+			log.Debug("Prepare the geckodriver command.")
+			cmd := exec.Command("geckodriver")
+			cmd.Stdout = nil
+			cmd.Stderr = nil
+			cmd.Env = append(os.Environ(), "MOZ_HEADLESS=1", "MOZ_REMOTE_SETTINGS_DEVTOOLS=1")
+			cmd.Args = append(cmd.Args, "-b", "/Applications/Firefox.app/Contents/MacOS/firefox")
+
+			log.Debug("Check if geckodriver is already running.")
+			if pid := getWebDriverPid(); pid != 0 {
+				log.Printf("Geckodriver is running with PID %d. Attempting to stop it...\n", pid)
+				if err := killProcess(pid); err != nil {
+					log.Error("Failed to kill geckodriver process: %v", err)
+				}
+				log.Debug("Waiting for the geckodriver process to finish")
+				time.Sleep(2 * time.Second)
+			}
+
+			log.Debug("Launch geckodriver")
+			if err := cmd.Start(); err != nil {
+				log.Error("Failed to start geckodriver: %v", err)
+			}
+			defer func() {
+				log.Debug("Killing geckodriver")
+				cmd.Process.Kill()
+			}()
+
+			log.Debug("Checking for Firefox process...")
+			timeoutDuration := 10 * time.Second
+			sleepInterval := 500 * time.Millisecond
+			startTime := time.Now()
+
+			for {
+				if time.Since(startTime) >= timeoutDuration {
+					log.Error("Timeout: Failed to detect a running Firefox instance.")
+				}
+
+				processes, err := process.Processes()
+				if err != nil {
+					log.Error("Failed to get processes: %v", err)
+				}
+
+				for _, p := range processes {
+					name, err := p.Name()
+					if err == nil && name == "firefox" {
+						log.Debug("Headless Firefox instance detected.")
+						goto WebDriverSetup
+					}
+				}
+
+				time.Sleep(sleepInterval)
+			}
+		WebDriverSetup:
+			log.Debug("Create webdriver client")
+			caps := selenium.Capabilities{"browserName": "firefox"}
+			wd, err := selenium.NewRemote(caps, "http://localhost:4444")
+			if err != nil {
+				log.Error("Failed to create WebDriver client: %v", err)
+			}
+			defer func() {
+				log.Debug("Quitting webdriver client")
+				wd.Quit()
+			}()
+
+			log.Debug("Getting webpage")
+			err = wd.Get(args[0])
+			if err != nil {
+				log.Error("Failed to load URL: %v", err)
+			}
+
+			if len(selectors) > 0 && selectors[0] != "*" && selectors[0] != "" {
+				log.Debug(fmt.Sprintf("Wait for locator: %s", selectors[0]))
+				_, err := wd.FindElement(selenium.ByCSSSelector, selectors[0])
+				if err != nil {
+					log.Error("Failed to find element: %v", err)
+				}
+			} else {
+				log.Debug("Wait for %d seconds", wait)
+				time.Sleep(time.Duration(wait) * time.Second)
+			}
+
+			source, err := wd.PageSource()
+			if err != nil {
+				log.Error("Failed to get page source: %v", err)
+			}
+
+			inputReader = strings.NewReader(source)
+		} else if args[0] != "-" {
 			file, err := os.Open(args[0])
 			handleError(err)
 			inputReader = file
@@ -51,9 +165,6 @@ var rootCmd = &cobra.Command{
 		handleError(err)
 
 		root, err := ParseHTML(inputReader, charset)
-		handleError(err)
-
-		selectors, err := cmd.Flags().GetStringSlice("selector")
 		handleError(err)
 
 		// Parse the selectors
@@ -127,9 +238,11 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.Flags().StringP("charset", "c", "", "Charset")
+	rootCmd.Flags().Int("wait", 1, "Time to wait for a page to render if an URL was provided")
 	rootCmd.Flags().StringSliceP("selector", "s", []string{"*"}, "CSS Selector")
 	rootCmd.Flags().Bool("remove-attributes", false, "Remove attributes")
 	rootCmd.Flags().Bool("remove-span", false, "Remove span")
+	rootCmd.Flags().Bool("verbose", false, "Verbose output")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -154,4 +267,58 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}
+}
+
+func isWebDriverRunning() bool {
+	conn, err := net.DialTimeout("tcp", "localhost:4444", 1*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+func createWebDriverClient(caps selenium.Capabilities) (selenium.WebDriver, error) {
+	wd, err := selenium.NewRemote(caps, "http://localhost:4444")
+	if err != nil {
+		return nil, errors.New("failed to create WebDriver client")
+	}
+	return wd, nil
+}
+
+func getWebDriverPid() int {
+	conn, err := net.DialTimeout("tcp", "localhost:4444", 1*time.Second)
+	if err != nil {
+		return 0
+	}
+	defer func() {
+		log.Debug("Closing connection")
+		conn.Close()
+	}()
+
+	processes, err := process.Processes()
+	if err != nil {
+		log.Error("Failed to get processes: %v", err)
+	}
+
+	for _, p := range processes {
+		name, err := p.Name()
+		if err == nil && name == "geckodriver" {
+			return int(p.Pid)
+		}
+	}
+
+	return 0
+}
+
+func killProcess(pid int) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("failed to find process with PID %d: %w", pid, err)
+	}
+	// On Unix-like systems, you can send the SIGTERM signal to the process
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("failed to kill process with PID %d: %w", pid, err)
+	}
+	return nil
 }
