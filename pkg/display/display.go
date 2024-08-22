@@ -1,4 +1,4 @@
-package cmd
+package display
 
 import (
 	"fmt"
@@ -8,19 +8,43 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-type Display struct {
+type DisplayBuilder struct {
+	inner *display
+}
+
+func NewDisplayBuilder() *DisplayBuilder {
+	return &DisplayBuilder{
+		inner: &display{},
+	}
+}
+
+func (b *DisplayBuilder) WithAttributes(value bool) *DisplayBuilder {
+	b.inner.attributes = value
+	return b
+}
+
+func (b *DisplayBuilder) WithSpan(value bool) *DisplayBuilder {
+	b.inner.span = value
+	return b
+}
+
+func (b *DisplayBuilder) Build() *display {
+	return b.inner
+}
+
+type display struct {
 	attributes bool
 	span       bool
 }
 
-func (d Display) Print(nodes []*html.Node) {
+func (d display) Print(nodes []*html.Node) {
 	for _, node := range nodes {
 		d.PrintNode(node, 0)
 	}
 }
 
 // PrintNode prints the node and its children.
-func (d Display) PrintNode(n *html.Node, level int) {
+func (d display) PrintNode(n *html.Node, level int) {
 	switch n.Type {
 	case html.TextNode:
 		s := n.Data
@@ -65,7 +89,7 @@ func (d Display) PrintNode(n *html.Node, level int) {
 }
 
 // PrintChildren prints the children of the node.
-func (d Display) PrintChildren(n *html.Node, level int) {
+func (d display) PrintChildren(n *html.Node, level int) {
 	child := n.FirstChild
 	for child != nil {
 		d.PrintNode(child, level)
@@ -73,14 +97,14 @@ func (d Display) PrintChildren(n *html.Node, level int) {
 	}
 }
 
-func (d Display) PrintIndent(level int) {
+func (d display) PrintIndent(level int) {
 	for ; level > 0; level-- {
 		fmt.Print(" ")
 	}
 }
 
 // PrintPre prints `<pre></pre>` tags as they come.
-func (d Display) PrintPre(n *html.Node) {
+func (d display) PrintPre(n *html.Node) {
 	switch n.Type {
 	case html.TextNode:
 		s := n.Data

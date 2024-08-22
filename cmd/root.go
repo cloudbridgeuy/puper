@@ -31,6 +31,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/net/html"
 
+	"github.com/cloudbridgeuy/puper/pkg/display"
 	"github.com/cloudbridgeuy/puper/pkg/errors"
 	"github.com/cloudbridgeuy/puper/pkg/geckodriver"
 	"github.com/cloudbridgeuy/puper/pkg/logger"
@@ -179,10 +180,11 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		Display{
-			attributes: !removeAttributes,
-			span:       !removeSpan,
-		}.Print(selectedNodes)
+		display.NewDisplayBuilder().
+			WithAttributes(!removeAttributes).
+			WithSpan(!removeSpan).
+			Build().
+			Print(selectedNodes)
 	},
 }
 
