@@ -1,4 +1,4 @@
-package cmd
+package selector
 
 import (
 	"bytes"
@@ -8,19 +8,58 @@ import (
 	"strings"
 	"text/scanner"
 
+	"github.com/cloudbridgeuy/puper/pkg/errors"
 	"golang.org/x/net/html"
 )
 
-// Selector is an interface for matching nodes
-type Selector interface {
+func Get(root *html.Node, selectors []string) ([]*html.Node, error) {
+	selectorFuncs := []selectorFunc{}
+	funcGenerator := Select
+	var selector string
+	for len(selectors) > 0 {
+		selector, selectors = selectors[0], selectors[1:]
+		switch selector {
+		case "*": // select all
+			continue
+		case ">":
+			funcGenerator = SelectFromChildren
+		case "+":
+			funcGenerator = SelectNextSibling
+		case ",": // nil will signify a comma
+			selectorFuncs = append(selectorFuncs, nil)
+		default:
+			selector, err := ParseSelector(selector)
+			if err != nil {
+				return []*html.Node{}, errors.NewPuperError(err, "Can't parse selector")
+			}
+			selectorFuncs = append(selectorFuncs, funcGenerator(selector))
+			funcGenerator = Select
+		}
+	}
+
+	selectedNodes := []*html.Node{}
+	currNodes := []*html.Node{root}
+
+	for _, selectorFunc := range selectorFuncs {
+		if selectorFunc == nil { // hit a comma
+			selectedNodes = append(selectedNodes, currNodes...)
+			currNodes = []*html.Node{root}
+		} else {
+			currNodes = selectorFunc(currNodes)
+		}
+	}
+
+	selectedNodes = append(selectedNodes, currNodes...)
+	return selectedNodes, nil
+}
+
+type selector interface {
 	Match(node *html.Node) bool
 }
 
-// SelectorFunc is a function that selects nodes
-type SelectorFunc func(nodes []*html.Node) []*html.Node
+type selectorFunc func(nodes []*html.Node) []*html.Node
 
-// Select returns a SelectorFunc that selects nodes that match the given selector
-func Select(s Selector) SelectorFunc {
+func Select(s selector) selectorFunc {
 	var selectChildren func(node *html.Node) []*html.Node
 
 	selectChildren = func(node *html.Node) []*html.Node {
@@ -46,7 +85,7 @@ func Select(s Selector) SelectorFunc {
 
 // SelectNextSibling selects the next sibling of the node
 // Defined for the '>' selector
-func SelectNextSibling(s Selector) SelectorFunc {
+func SelectNextSibling(s selector) selectorFunc {
 	return func(nodes []*html.Node) []*html.Node {
 		selected := []*html.Node{}
 		for _, node := range nodes {
@@ -65,7 +104,7 @@ func SelectNextSibling(s Selector) SelectorFunc {
 
 // SelectFromChildren selects the children of the nodes
 // Defined for the '+' selector
-func SelectFromChildren(s Selector) SelectorFunc {
+func SelectFromChildren(s selector) selectorFunc {
 	return func(nodes []*html.Node) []*html.Node {
 		selected := []*html.Node{}
 		for _, node := range nodes {
@@ -81,14 +120,14 @@ func SelectFromChildren(s Selector) SelectorFunc {
 
 type PseudoClass func(*html.Node) bool
 
-type CSSSelector struct {
+type CSSselector struct {
 	Tag    string
 	Attrs  map[string]*regexp.Regexp
 	Pseudo PseudoClass
 }
 
 // Match matches a node based on a CSS selector
-func (s CSSSelector) Match(node *html.Node) bool {
+func (s CSSselector) Match(node *html.Node) bool {
 	if node.Type != html.ElementNode {
 		return false
 	}
@@ -120,8 +159,8 @@ func (s CSSSelector) Match(node *html.Node) bool {
 
 // ParseSelector parses a selector
 // e.g. `div#my-button.btn[href^="http"]`
-func ParseSelector(cmd string) (selector CSSSelector, err error) {
-	selector = CSSSelector{
+func ParseSelector(cmd string) (selector CSSselector, err error) {
+	selector = CSSselector{
 		Tag:    "",
 		Attrs:  map[string]*regexp.Regexp{},
 		Pseudo: nil,
@@ -134,7 +173,7 @@ func ParseSelector(cmd string) (selector CSSSelector, err error) {
 
 // Parse the initial tag
 // e.g. `div`
-func ParseTagMatcher(selector *CSSSelector, s scanner.Scanner) error {
+func ParseTagMatcher(selector *CSSselector, s scanner.Scanner) error {
 	tag := bytes.NewBuffer([]byte{})
 	defer func() {
 		selector.Tag = tag.String()
@@ -162,7 +201,7 @@ func ParseTagMatcher(selector *CSSSelector, s scanner.Scanner) error {
 
 // Parse a class matcher
 // e.g. `.btn`
-func ParseClassMatcher(selector *CSSSelector, s scanner.Scanner) error {
+func ParseClassMatcher(selector *CSSselector, s scanner.Scanner) error {
 	var class bytes.Buffer
 	defer func() {
 		regexpStr := `(\A|\s)` + regexp.QuoteMeta(class.String()) + `(\s|\z)`
@@ -191,7 +230,7 @@ func ParseClassMatcher(selector *CSSSelector, s scanner.Scanner) error {
 
 // Parse an id matcher
 // e.g. `#my-picture`
-func ParseIdMatcher(selector *CSSSelector, s scanner.Scanner) error {
+func ParseIdMatcher(selector *CSSselector, s scanner.Scanner) error {
 	var id bytes.Buffer
 	defer func() {
 		regexpStr := `^` + regexp.QuoteMeta(id.String()) + `$`
@@ -220,7 +259,7 @@ func ParseIdMatcher(selector *CSSSelector, s scanner.Scanner) error {
 
 // Parse an attribute matcher
 // e.g. `[attr^="http"]`
-func ParseAttrMatcher(selector *CSSSelector, s scanner.Scanner) error {
+func ParseAttrMatcher(selector *CSSselector, s scanner.Scanner) error {
 	var attrKey bytes.Buffer
 	var attrVal bytes.Buffer
 	hasMatchVal := false
@@ -344,7 +383,7 @@ func ParseAttrMatcher(selector *CSSSelector, s scanner.Scanner) error {
 }
 
 // Parse the selector after ':'
-func ParsePseudo(selector *CSSSelector, s scanner.Scanner) error {
+func ParsePseudo(selector *CSSselector, s scanner.Scanner) error {
 	if selector.Pseudo != nil {
 		return fmt.Errorf("Combined multiple pseudo classes")
 	}

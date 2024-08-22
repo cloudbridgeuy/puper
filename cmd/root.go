@@ -29,13 +29,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"golang.org/x/net/html"
 
 	"github.com/cloudbridgeuy/puper/pkg/display"
 	"github.com/cloudbridgeuy/puper/pkg/errors"
 	"github.com/cloudbridgeuy/puper/pkg/geckodriver"
 	"github.com/cloudbridgeuy/puper/pkg/logger"
 	"github.com/cloudbridgeuy/puper/pkg/net"
+	"github.com/cloudbridgeuy/puper/pkg/selector"
 )
 
 var cfgFile string
@@ -117,7 +117,10 @@ var rootCmd = &cobra.Command{
 			inputReader = strings.NewReader(g.GetSource())
 		} else if args[0] != "-" {
 			file, err := os.Open(args[0])
-			handleError(err)
+			if err != nil {
+				errors.HandleAsPuperError(err, "Can't open file")
+				return
+			}
 			inputReader = file
 		}
 
@@ -133,42 +136,11 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		selectorFuncs := []SelectorFunc{}
-		funcGenerator := Select
-		var selector string
-		for len(selectors) > 0 {
-			selector, selectors = selectors[0], selectors[1:]
-			switch selector {
-			case "*": // select all
-				continue
-			case ">":
-				funcGenerator = SelectFromChildren
-			case "+":
-				funcGenerator = SelectNextSibling
-			case ",": // nil will signify a comma
-				selectorFuncs = append(selectorFuncs, nil)
-			default:
-				selector, err := ParseSelector(selector)
-				if err != nil {
-					errors.HandleAsPuperError(err, "Can't parse selector")
-					return
-				}
-				selectorFuncs = append(selectorFuncs, funcGenerator(selector))
-				funcGenerator = Select
-			}
+		selectedNodes, err := selector.Get(root, selectors)
+		if err != nil {
+			errors.HandleAsPuperError(err, "Can't run selectors on root")
+			return
 		}
-
-		selectedNodes := []*html.Node{}
-		currNodes := []*html.Node{root}
-		for _, selectorFunc := range selectorFuncs {
-			if selectorFunc == nil { // hit a comma
-				selectedNodes = append(selectedNodes, currNodes...)
-				currNodes = []*html.Node{root}
-			} else {
-				currNodes = selectorFunc(currNodes)
-			}
-		}
-		selectedNodes = append(selectedNodes, currNodes...)
 
 		removeAttributes, err := cmd.Flags().GetBool("remove-attributes")
 		if err != nil {
