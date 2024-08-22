@@ -33,9 +33,9 @@ import (
 	"github.com/cloudbridgeuy/puper/pkg/display"
 	"github.com/cloudbridgeuy/puper/pkg/errors"
 	"github.com/cloudbridgeuy/puper/pkg/geckodriver"
+	"github.com/cloudbridgeuy/puper/pkg/html"
 	"github.com/cloudbridgeuy/puper/pkg/logger"
 	"github.com/cloudbridgeuy/puper/pkg/net"
-	"github.com/cloudbridgeuy/puper/pkg/selector"
 )
 
 var cfgFile string
@@ -130,13 +130,13 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		root, err := ParseHTML(inputReader, charset)
+		root, err := html.ParseHTML(inputReader, charset)
 		if err != nil {
 			errors.HandleAsPuperError(err, "Can't get the html document")
 			return
 		}
 
-		selectedNodes, err := selector.Get(root, selectors)
+		selectedNodes, err := html.Get(root, selectors)
 		if err != nil {
 			errors.HandleAsPuperError(err, "Can't run selectors on root")
 			return
