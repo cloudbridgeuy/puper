@@ -99,14 +99,15 @@ var rootCmd = &cobra.Command{
 		// Check if the entrypoint is a URL
 		if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
 			logger.Logger.Debugf("Running geckodriver")
-			g := geckodriver.NewGeckodriver(
-				geckodriver.WithUrl(args[0]),
-				geckodriver.WithSelectors(selectors),
-				geckodriver.WithPort(port),
-				geckodriver.WithBinary(firefoxBinary),
-				geckodriver.WithDefaultLogger(),
-				geckodriver.WithWait(wait),
-			)
+			g := geckodriver.NewGeckodriverBuilder().
+				WithUrl(args[0]).
+				WithSelectors(selectors).
+				WithPort(port).
+				WithBinary(firefoxBinary).
+				WithDefaultLogger().
+				WithWait(wait).
+				Build()
+
 			err = g.Run()
 			if err != nil {
 				errors.HandleAsPuperError(err, "Geckodriver failed to fetch the page source")

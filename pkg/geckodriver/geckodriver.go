@@ -14,7 +14,7 @@ import (
 	"github.com/tebeka/selenium"
 )
 
-type Geckodriver struct {
+type geckodriver struct {
 	binary    string
 	port      int
 	logger    *log.Logger
@@ -24,69 +24,64 @@ type Geckodriver struct {
 	source    string
 }
 
-// geckodriverConfigFn is a function that configures a Geckodriver.
-type geckodriverConfigFn func(g Geckodriver) Geckodriver
+type builder struct {
+	inner *geckodriver
+}
 
-// NewGeckodriver creates a new Geckodriver with the given configuration.
-func NewGeckodriver(fns ...geckodriverConfigFn) Geckodriver {
-	var g Geckodriver
-
-	for _, f := range fns {
-		g = f(g)
+func NewGeckodriverBuilder() *builder {
+	return &builder{
+		inner: &geckodriver{},
 	}
-
-	return g
 }
 
 // WithDefaultLogger sets the default logger instance on the Geckodriver struct.
-func WithDefaultLogger() geckodriverConfigFn {
-	return func(g Geckodriver) Geckodriver {
-		g.logger = logger.Logger
-		return g
-	}
+func (b *builder) WithDefaultLogger() *builder {
+	b.inner.logger = logger.Logger
+	return b
+}
+
+// WithLogger sets the default logger instance on the Geckodriver struct.
+func (b *builder) WithLogger(log.Logger) *builder {
+	b.inner.logger = logger.Logger
+	return b
 }
 
 // WithBinary sets the binary for the Geckodriver.
-func WithBinary(binary string) geckodriverConfigFn {
-	return func(g Geckodriver) Geckodriver {
-		g.binary = binary
-		return g
-	}
+func (b *builder) WithBinary(binary string) *builder {
+	b.inner.binary = binary
+	return b
 }
 
 // WithPort sets the port for the Geckodriver.
-func WithPort(port int) geckodriverConfigFn {
-	return func(g Geckodriver) Geckodriver {
-		g.port = port
-		return g
-	}
+func (b *builder) WithPort(port int) *builder {
+	b.inner.port = port
+	return b
 }
 
 // WithSelectors sets the selectors for the Geckodriver.
-func WithSelectors(selectors []string) geckodriverConfigFn {
-	return func(g Geckodriver) Geckodriver {
-		g.selectors = selectors
-		return g
-	}
+func (b *builder) WithSelectors(selectors []string) *builder {
+	b.inner.selectors = selectors
+	return b
 }
 
 // WithUrl sets the URL for the Geckodriver.
-func WithUrl(url string) geckodriverConfigFn {
-	return func(g Geckodriver) Geckodriver {
-		g.url = url
-		return g
-	}
+func (b *builder) WithUrl(url string) *builder {
+	b.inner.url = url
+	return b
 }
 
 // WithWait sets the URL for the Geckodriver.
-func WithWait(wait int) geckodriverConfigFn {
-	return func(g Geckodriver) Geckodriver {
-		g.wait = wait
-		return g
-	}
+func (b *builder) WithWait(wait int) *builder {
+	b.inner.wait = wait
+	return b
 }
 
-func (g *Geckodriver) Run() error {
+// Build returns the inner struct
+func (b *builder) Build() *geckodriver {
+	return b.inner
+}
+
+func (g *geckodriver) Run() error {
 	g.logger.Debug("Prepare the geckodriver command.")
 	command := exec.Command("geckodriver")
 	command.Env = append(os.Environ(), "MOZ_HEADLESS=1", "MOZ_REMOTE_SETTINGS_DEVTOOLS=1")
@@ -129,7 +124,7 @@ func (g *Geckodriver) Run() error {
 	}
 }
 
-func (g *Geckodriver) webdriver() error {
+func (g *geckodriver) webdriver() error {
 	g.logger.Debug("Starting firefox control through geckodriver using the webdriver protocol")
 
 	url := fmt.Sprintf("http://localhost:%d", g.port)
@@ -172,6 +167,6 @@ func (g *Geckodriver) webdriver() error {
 }
 
 // GetSource returns the source found after running the `Run` method.
-func (g Geckodriver) GetSource() string {
+func (g geckodriver) GetSource() string {
 	return g.source
 }
