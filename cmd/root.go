@@ -43,8 +43,23 @@ var cfgFile string
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "puper [STDIN/FILE/URL]",
-	Short: "Clean up HTML code",
-	Args:  cobra.MaximumNArgs(1),
+	Short: "Manipulate HTML read from a file, stdin, or an url",
+	Long: `
+Puper
+-----
+
+Tool that allows you to filter or select portions of your HTML code,
+which you can then clean up by removing all attributes or annoying span
+fields. This is quite useful for pseudo-RAG enabled AI scripts, where you
+don't want to send a bunch of garbage to the LLMs.
+
+Puper uses 'firefox' and 'geckodriver' to get the source of the provided
+URL, allowing you to render pages that require client-side JavaScript
+rendering. Each call will spawn a new instance of both resources, listening
+on a random open port of your machine (by default), so you can run multiple
+instances of 'puper' at the same time without issues (other than your
+hardware's resources).`,
+	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		verbose, err := cmd.Flags().GetBool("verbose")
 		if err != nil {
