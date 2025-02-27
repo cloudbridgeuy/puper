@@ -149,6 +149,7 @@ func (g *geckodriver) webdriver() error {
 
 	if len(g.selectors) > 0 && g.selectors[0] != "*" && g.selectors[0] != "" {
 		g.logger.Debug("Waiting for locator", "selector", g.selectors[0])
+		wd.SetImplicitWaitTimeout(time.Duration(g.wait) * time.Second)
 		_, err := wd.FindElement(selenium.ByCSSSelector, g.selectors[0])
 		if err != nil {
 			return errors.NewPuperError(err, "Failed to find element")

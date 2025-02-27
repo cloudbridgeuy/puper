@@ -22,11 +22,18 @@ THE SOFTWARE.
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	// htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/strikethrough"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/table"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -111,6 +118,12 @@ hardware's resources).`,
 			}
 		}
 
+		markdown, err := cmd.Flags().GetBool("markdown")
+		if err != nil {
+			errors.HandleAsPuperError(err, "Can't get the markdown flag")
+			return
+		}
+
 		// Check if the entrypoint is a URL
 		if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
 			logger.Logger.Debugf("Running geckodriver")
@@ -168,11 +181,41 @@ hardware's resources).`,
 			return
 		}
 
-		display.NewDisplayBuilder().
+		b := display.NewDisplayBuilder().
 			WithAttributes(!removeAttributes).
-			WithSpan(!removeSpan).
-			Build().
-			Print(selectedNodes)
+			WithSpan(!removeSpan)
+
+		if markdown {
+			var buffer bytes.Buffer
+			b.WithWriter(&buffer).Build().Print(selectedNodes)
+
+			conv := converter.NewConverter(
+				converter.WithPlugins(
+					base.NewBasePlugin(),
+					commonmark.NewCommonmarkPlugin(
+						commonmark.WithStrongDelimiter("**"),
+					),
+					strikethrough.NewStrikethroughPlugin(),
+					table.NewTablePlugin(),
+				),
+			)
+
+			conv.Register.TagType("button", converter.TagTypeRemove, converter.PriorityStandard)
+
+			// Remove entries like `<<` from the buffer:
+			buffer = *bytes.NewBuffer([]byte(strings.Replace(buffer.String(), "<<", "", -1)))
+
+			m, err := conv.ConvertReader(&buffer)
+			if err != nil {
+				errors.HandleAsPuperError(err, "Can't convert the HTML to markdown")
+				return
+			}
+
+			fmt.Println(string(m))
+		} else {
+			b.Build().Print(selectedNodes)
+		}
+
 	},
 }
 
@@ -198,6 +241,7 @@ func init() {
 	rootCmd.Flags().Bool("remove-attributes", false, "Remove attributes")
 	rootCmd.Flags().Bool("remove-span", false, "Remove span")
 	rootCmd.Flags().Bool("verbose", false, "Verbose output")
+	rootCmd.Flags().Bool("markdown", false, "Convert the output to markdown")
 }
 
 func initConfig() {

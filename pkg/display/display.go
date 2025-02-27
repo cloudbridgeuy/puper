@@ -2,6 +2,8 @@ package display
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -14,8 +16,13 @@ type DisplayBuilder struct {
 
 func NewDisplayBuilder() *DisplayBuilder {
 	return &DisplayBuilder{
-		inner: &display{},
+		inner: &display{writer: io.Writer(os.Stdout)},
 	}
+}
+
+func (b *DisplayBuilder) WithWriter(w io.Writer) *DisplayBuilder {
+	b.inner.writer = w
+	return b
 }
 
 func (b *DisplayBuilder) WithAttributes(value bool) *DisplayBuilder {
@@ -35,6 +42,7 @@ func (b *DisplayBuilder) Build() *display {
 type display struct {
 	attributes bool
 	span       bool
+	writer     io.Writer
 }
 
 func (d display) Print(nodes []*html.Node) {
@@ -51,7 +59,7 @@ func (d display) PrintNode(n *html.Node, level int) {
 		s = strings.TrimSpace(s)
 		if s != "" {
 			d.PrintIndent(level)
-			fmt.Println(s)
+			fmt.Fprintf(d.writer, "%s\n", s)
 		}
 	case html.ElementNode:
 		d.PrintIndent(level)
@@ -63,26 +71,21 @@ func (d display) PrintNode(n *html.Node, level int) {
 			d.PrintChildren(n, level)
 			return
 		}
-		fmt.Printf("<%s", n.Data)
+		fmt.Fprintf(d.writer, "<%s", n.Data)
 		for _, a := range n.Attr {
 			if !d.attributes && a.Key != "href" && a.Key != "id" {
 				continue
 			}
 			val := a.Val
-			fmt.Printf(` %s="%s"`, a.Key, val)
+			fmt.Fprintf(d.writer, ` %s="%s"`, a.Key, val)
 		}
-		fmt.Println(">")
+		fmt.Fprintf(d.writer, ">\n")
 
 		if !IsVoidElement(n) {
 			d.PrintChildren(n, level+1)
 			d.PrintIndent(level)
-			fmt.Printf("</%s>\n", n.Data)
+			fmt.Fprintf(d.writer, "</%s>\n", n.Data)
 		}
-	case html.CommentNode:
-		d.PrintIndent(level)
-		data := n.Data
-		fmt.Printf("<!--%s-->\n", data)
-		d.PrintChildren(n, level)
 	case html.DoctypeNode, html.DocumentNode:
 		d.PrintChildren(n, level)
 	}
@@ -99,7 +102,7 @@ func (d display) PrintChildren(n *html.Node, level int) {
 
 func (d display) PrintIndent(level int) {
 	for ; level > 0; level-- {
-		fmt.Print(" ")
+		fmt.Fprintf(d.writer, " ")
 	}
 }
 
@@ -108,7 +111,7 @@ func (d display) PrintPre(n *html.Node) {
 	switch n.Type {
 	case html.TextNode:
 		s := n.Data
-		fmt.Print(s)
+		fmt.Fprintf(d.writer, "%s", s)
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			d.PrintPre(c)
 		}
@@ -121,28 +124,26 @@ func (d display) PrintPre(n *html.Node) {
 			}
 			return
 		}
-		fmt.Printf("<%s", n.Data)
+		fmt.Fprintf(d.writer, "<%s", n.Data)
 		if d.attributes {
 			for _, a := range n.Attr {
 				if !d.attributes && a.Key != "href" && a.Key != "id" {
 					continue
 				}
 				val := a.Val
-				fmt.Printf(` %s="%s"`, a.Key, val)
+				fmt.Fprintf(d.writer, ` %s="%s"`, a.Key, val)
 			}
 		}
-		fmt.Print(">")
+		fmt.Fprintf(d.writer, ">")
 		if !IsVoidElement(n) {
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
 				d.PrintPre(c)
 			}
-			fmt.Printf("</%s>", n.Data)
-		}
-	case html.CommentNode:
-		data := n.Data
-		fmt.Printf("<!--%s-->\n", data)
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			d.PrintPre(c)
+			if n.DataAtom == atom.Pre {
+				fmt.Fprintf(d.writer, "</%s>\n", n.Data)
+			} else {
+				fmt.Fprintf(d.writer, "</%s>", n.Data)
+			}
 		}
 	case html.DoctypeNode, html.DocumentNode:
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
