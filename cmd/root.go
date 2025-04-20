@@ -124,6 +124,12 @@ hardware's resources).`,
 			return
 		}
 
+		remove, err := cmd.Flags().GetString("remove")
+		if err != nil {
+			errors.HandleAsPuperError(err, "Can't get the remove flag")
+			return
+		}
+
 		// Check if the entrypoint is a URL
 		if strings.HasPrefix(args[0], "http://") || strings.HasPrefix(args[0], "https://") {
 			logger.Logger.Debugf("Running geckodriver")
@@ -202,8 +208,9 @@ hardware's resources).`,
 
 			conv.Register.TagType("button", converter.TagTypeRemove, converter.PriorityStandard)
 
-			// Remove entries like `<<` from the buffer:
-			buffer = *bytes.NewBuffer([]byte(strings.Replace(buffer.String(), "<<", "", -1)))
+			for _, r := range strings.Split(remove, ",") {
+				buffer = *bytes.NewBuffer([]byte(strings.Replace(buffer.String(), r, "", -1)))
+			}
 
 			m, err := conv.ConvertReader(&buffer)
 			if err != nil {
@@ -242,6 +249,7 @@ func init() {
 	rootCmd.Flags().Bool("remove-span", false, "Remove span")
 	rootCmd.Flags().Bool("verbose", false, "Verbose output")
 	rootCmd.Flags().Bool("markdown", false, "Convert the output to markdown")
+	rootCmd.Flags().String("remove", "<<", "Comma separated list of strings to remove. Useful for markdown parsing.")
 }
 
 func initConfig() {
